@@ -18,7 +18,8 @@ export class TelemetryRepository {
           id: randomUUID(),
           device_id: params.deviceId,
           value: params.value.toFixed(2),
-          timestamp: Math.floor(params.timestamp.getTime() / 1000), // Unix timestamp in seconds
+          // DateTime64(3): "YYYY-MM-DD HH:MM:SS.mmm"
+          timestamp: params.timestamp.toISOString().replace('T', ' ').replace('Z', ''),
         },
       ],
       format: 'JSONEachRow',
@@ -39,23 +40,22 @@ export class TelemetryRepository {
 
     const resultSet = await this.clickhouse.query({
       query,
-      query_params: {
-        deviceId,
-        limit,
-      },
+      query_params: { deviceId, limit },
       format: 'JSONEachRow',
     });
 
-    const rows = await resultSet.json<Array<{
+    // Passe o tipo da ROW. A lib já retorna um array de rows.
+    const rows = await resultSet.json<{
       deviceId: string;
       value: string;
-      timestamp: number;
-    }>>();
+      timestamp: string;
+    }>();
 
     return rows.map((r) => ({
       deviceId: r.deviceId,
       value: Number(r.value),
-      timestamp: new Date(r.timestamp * 1000), // Convert Unix timestamp to Date
+      // Converte "YYYY-MM-DD HH:MM:SS.mmm" -> ISO UTC consistente
+      timestamp: new Date(r.timestamp.replace(' ', 'T') + 'Z'),
     }));
   }
 }
