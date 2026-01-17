@@ -5,11 +5,16 @@ import { sql } from 'drizzle-orm';
 
 import { buildApp } from '../src/app';
 import { db } from '../src/infra/db/drizzle';
-import { devices, sensorReadings } from '../src/infra/db/schema';
+import { clickhouse } from '../src/infra/db/clickhouse';
+import { devices } from '../src/infra/db/schema';
 
 t.test('tenant isolation: cannot read or write telemetry from another tenant', async (t) => {
-  // limpa tabelas (ordem importa por causa de FK futura, mesmo que você não tenha agora)
-  await db.delete(sensorReadings).where(sql`true`);
+  // Clean ClickHouse sensor_readings table
+  await clickhouse.command({
+    query: 'TRUNCATE TABLE IF EXISTS sensor_readings',
+  });
+
+  // Clean PostgreSQL devices table
   await db.delete(devices).where(sql`true`);
 
   const tenantA = 'tenant-a';

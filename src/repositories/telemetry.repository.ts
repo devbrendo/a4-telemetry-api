@@ -1,8 +1,5 @@
-import { desc, eq } from 'drizzle-orm';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { ClickHouseClient } from '@clickhouse/client';
 import { randomUUID } from 'crypto';
-
-import { sensorReadings } from '../infra/db/schema';
 
 export type SensorReading = {
   deviceId: string;
@@ -11,34 +8,54 @@ export type SensorReading = {
 };
 
 export class TelemetryRepository {
-  constructor(private readonly db: NodePgDatabase) {}
+  constructor(private readonly clickhouse: ClickHouseClient) {}
 
   async insertReading(params: { deviceId: string; value: number; timestamp: Date }): Promise<void> {
-    await this.db.insert(sensorReadings).values({
-      id: randomUUID(),
-      deviceId: params.deviceId,
-      // numeric no Postgres: melhor salvar como string pra não dar surpresa
-      value: params.value.toFixed(2),
-      timestamp: params.timestamp,
+    await this.clickhouse.insert({
+      table: 'sensor_readings',
+      values: [
+        {
+          id: randomUUID(),
+          device_id: params.deviceId,
+          value: params.value.toFixed(2),
+          timestamp: Math.floor(params.timestamp.getTime() / 1000), // Unix timestamp in seconds
+        },
+      ],
+      format: 'JSONEachRow',
     });
   }
 
   async getLastReadings(deviceId: string, limit = 10): Promise<SensorReading[]> {
-    const rows = await this.db
-      .select({
-        deviceId: sensorReadings.deviceId,
-        value: sensorReadings.value,
-        timestamp: sensorReadings.timestamp,
-      })
-      .from(sensorReadings)
-      .where(eq(sensorReadings.deviceId, deviceId))
-      .orderBy(desc(sensorReadings.timestamp))
-      .limit(limit);
+    const query = `
+      SELECT
+        device_id as deviceId,
+        value,
+        timestamp
+      FROM sensor_readings
+      WHERE device_id = {deviceId:UUID}
+      ORDER BY timestamp DESC
+      LIMIT {limit:UInt32}
+    `;
+
+    const resultSet = await this.clickhouse.query({
+      query,
+      query_params: {
+        deviceId,
+        limit,
+      },
+      format: 'JSONEachRow',
+    });
+
+    const rows = await resultSet.json<Array<{
+      deviceId: string;
+      value: string;
+      timestamp: number;
+    }>>();
 
     return rows.map((r) => ({
       deviceId: r.deviceId,
-      value: Number(r.value), // numeric do PG costuma vir string
-      timestamp: r.timestamp,
+      value: Number(r.value),
+      timestamp: new Date(r.timestamp * 1000), // Convert Unix timestamp to Date
     }));
   }
 }

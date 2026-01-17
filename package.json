@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "db:generate": "node -r dotenv/config ./node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "node -r dotenv/config ./node_modules/drizzle-kit/bin.cjs migrate",
+    "db:migrate:clickhouse": "tsx -r dotenv/config src/infra/db/migrate-clickhouse.ts",
     "db:seed": "tsx -r dotenv/config src/infra/db/seed.ts",
     "test": "tsx -r dotenv/config node_modules/.bin/tap tests/**/*.test.ts"
   },
@@ -16,6 +17,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@clickhouse/client": "^1.16.0",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.1",
     "fastify": "^5.7.1",

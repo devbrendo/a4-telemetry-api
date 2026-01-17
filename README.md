@@ -21,7 +21,8 @@ src/
 ├── repositories/        # Camada de acesso a dados
 ├── infra/              # Infraestrutura
 │   ├── db/             # Configuração do banco de dados
-│   │   ├── schema.ts   # Schemas Drizzle ORM
+│   │   ├── schema.ts   # Schemas Drizzle ORM (PostgreSQL)
+│   │   ├── clickhouse.ts # Cliente ClickHouse
 │   │   └── migrations/ # Migrações SQL
 │   └── http/           # Camada HTTP
 │       ├── controllers/
@@ -30,12 +31,28 @@ src/
 └── factories/          # Injeção de dependências (Singleton Pattern)
 ```
 
-## 🛠️ Tecnologias Utilizadas
+### Arquitetura Híbrida de Banco de Dados
+
+O sistema utiliza uma arquitetura híbrida com dois bancos de dados especializados:
+
+**PostgreSQL (OLTP)** - Metadados e relacionamentos:
+- Tabela `devices` - Informações de dispositivos e tenants
+- Operações transacionais (CRUD)
+- Drizzle ORM para queries type-safe
+
+**ClickHouse (OLAP)** - Séries temporais:
+- Tabela `sensor_readings` - Leituras de telemetria
+- Otimizado para inserções em alta velocidade
+- Queries analíticas eficientes com MergeTree engine
+- Compressão automática de dados históricos
+
+## Tecnologias Utilizadas
 
 - **Node.js** + **TypeScript** - Runtime e linguagem
 - **Fastify** - Framework HTTP de alta performance
-- **Drizzle ORM** - Type-safe SQL ORM
-- **PostgreSQL 16** - Banco de dados relacional
+- **Drizzle ORM** - Type-safe SQL ORM para PostgreSQL
+- **PostgreSQL 16** - Banco de dados relacional para metadados
+- **ClickHouse** - Banco OLAP para séries temporais (telemetria)
 - **Docker Compose** - Orquestração de containers
 - **Tap** - Framework de testes
 
@@ -65,36 +82,48 @@ npm install
 Crie um arquivo `.env` na raiz do projeto:
 
 ```env
-DATABASE_URL=postgresql://a4:a4pass@localhost:5432/a4_telemetry
+# API
 PORT=3000
+HOST=0.0.0.0
+
+# PostgreSQL
+DATABASE_URL=postgresql://a4:a4pass@localhost:5432/a4_telemetry
+
+# ClickHouse
+CLICKHOUSE_HOST=http://localhost:8123
+CLICKHOUSE_USER=a4
+CLICKHOUSE_PASSWORD=a4pass
+CLICKHOUSE_DB=a4_telemetry
 ```
 
-### 4. Subir o banco de dados com Docker
+### 4. Subir os bancos de dados com Docker
 
 ```bash
-# Docker Compose v2 (recomendado – padrão atual)
 docker compose up -d
-
-# Docker Compose v1 (ambientes mais antigos)
-docker-compose up -d
 ```
-
-Observação:
-O comando docker compose (sem hífen) é o padrão nas versões mais recentes do Docker Desktop.
-O comando docker-compose é mantido aqui para compatibilidade com ambientes legados.
 
 Isso irá inicializar:
-- PostgreSQL na porta 5432
-- Container: `a4_postgres`
-- Database: `a4_telemetry`
+- **PostgreSQL** na porta 5432
+  - Container: `a4_postgres`
+  - Database: `a4_telemetry`
+  - Armazena metadados de dispositivos e tenants
 
-### 5. Executar migrações do banco
+- **ClickHouse** nas portas 8123 (HTTP) e 9000 (Native)
+  - Container: `a4_clickhouse`
+  - Database: `a4_telemetry`
+  - Armazena séries temporais de telemetria
+
+### 5. Executar migrações dos bancos de dados
 
 ```bash
+# PostgreSQL (Drizzle ORM)
 npm run db:migrate
+
+# ClickHouse
+npm run db:migrate:clickhouse
 ```
 
-### 6. (Opcional) Popular banco com dados de teste
+### 6. (Opcional) Popular bancos com dados de teste
 
 ```bash
 npm run db:seed
@@ -102,8 +131,8 @@ npm run db:seed
 
 Isso criará:
 - 2 tenants: `tenant-a` e `tenant-b`
-- 2 dispositivos por tenant
-- Leituras de telemetria de exemplo
+- 2 dispositivos (1 por tenant) no PostgreSQL
+- 30 leituras de telemetria de exemplo no ClickHouse (15 por dispositivo)
 
 ### 7. Iniciar o servidor
 
@@ -234,7 +263,9 @@ if (!device) throw new Error('Device not found')
 
 ## Schema do Banco de Dados
 
-### Tabela: `devices`
+### PostgreSQL - Metadados
+
+**Tabela: `devices`**
 ```sql
 CREATE TABLE devices (
   id UUID PRIMARY KEY,
@@ -243,31 +274,48 @@ CREATE TABLE devices (
 );
 ```
 
-### Tabela: `sensor_readings`
+### ClickHouse - Séries Temporais
+
+**Tabela: `sensor_readings`**
 ```sql
 CREATE TABLE sensor_readings (
-  id UUID PRIMARY KEY,
+  id UUID DEFAULT generateUUIDv4(),
   device_id UUID NOT NULL,
-  value NUMERIC(10, 2) NOT NULL,
-  timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+  value Decimal(10, 2) NOT NULL,
+  timestamp DateTime64(3) DEFAULT now64(3)
+)
+ENGINE = MergeTree()
+ORDER BY (device_id, timestamp)
+SETTINGS index_granularity = 8192;
 ```
+
+**Por que ClickHouse?**
+- MergeTree engine otimizado para séries temporais
+- Compressão eficiente de dados históricos
+- Inserções extremamente rápidas (milhões de registros/segundo)
+- Queries analíticas com agregações performáticas
+- Ideal para IoT e telemetria em larga escala
 
 ## Scripts Disponíveis
 
 ```bash
 # Desenvolvimento
-npm run dev              # Inicia servidor em modo watch
-npm run build            # Compila TypeScript para JavaScript
-npm start                # Inicia servidor em produção
+npm run dev                    # Inicia servidor em modo watch
+npm run build                  # Compila TypeScript para JavaScript
+npm start                      # Inicia servidor em produção
 
-# Banco de Dados
-npm run db:generate      # Gera novas migrações
-npm run db:migrate       # Executa migrações pendentes
-npm run db:seed          # Popula banco com dados de teste
+# Banco de Dados - PostgreSQL
+npm run db:generate            # Gera novas migrações (Drizzle)
+npm run db:migrate             # Executa migrações pendentes (PostgreSQL)
+
+# Banco de Dados - ClickHouse
+npm run db:migrate:clickhouse  # Executa migrações do ClickHouse
+
+# Dados de Teste
+npm run db:seed                # Popula ambos os bancos com dados de teste
 
 # Testes
-npm test                 # Executa todos os testes
+npm test                       # Executa todos os testes de integração
 ```
 
 ## Estrutura de Injeção de Dependências
@@ -318,7 +366,7 @@ curl http://localhost:3000/telemetry/device-a-uuid \
 
 ## Próximos Passos / Melhorias Futuras
 
-- [ ] Implementar ClickHouse para armazenamento de séries temporais em escala
+- [x] Implementar ClickHouse para armazenamento de séries temporais em escala
 - [ ] Adicionar autenticação JWT real (atualmente simulado via header)
 - [ ] Implementar rate limiting por tenant
 - [ ] Adicionar métricas e observabilidade (Prometheus/Grafana)
@@ -327,6 +375,7 @@ curl http://localhost:3000/telemetry/device-a-uuid \
 - [ ] Implementar cache de dispositivos (Redis)
 - [ ] Adicionar validação de schema com Zod
 - [ ] Configurar CI/CD pipeline
+- [ ] Adicionar índices e otimizações de query no ClickHouse
 
 ## Licença
 

@@ -1,4 +1,5 @@
 import { db } from '../infra/db/drizzle';
+import { clickhouse } from '../infra/db/clickhouse';
 
 import { DeviceRepository } from '../repositories/device.repository';
 import { TelemetryRepository } from '../repositories/telemetry.repository';
@@ -17,7 +18,7 @@ export class AppFactory {
 
   private constructor() {
     this.deviceRepository = new DeviceRepository(db);
-    this.telemetryRepository = new TelemetryRepository(db);
+    this.telemetryRepository = new TelemetryRepository(clickhouse);
 
     this.ingestTelemetryUseCase = new IngestTelemetryUseCase(
       this.deviceRepository,
