@@ -72,8 +72,16 @@ PORT=3000
 ### 4. Subir o banco de dados com Docker
 
 ```bash
+# Docker Compose v2 (recomendado – padrão atual)
+docker compose up -d
+
+# Docker Compose v1 (ambientes mais antigos)
 docker-compose up -d
 ```
+
+Observação:
+O comando docker compose (sem hífen) é o padrão nas versões mais recentes do Docker Desktop.
+O comando docker-compose é mantido aqui para compatibilidade com ambientes legados.
 
 Isso irá inicializar:
 - PostgreSQL na porta 5432
@@ -157,7 +165,7 @@ x-tenant-id: tenant-a
   "deviceId": "uuid-do-dispositivo",
   "readings": [
     {
-      "value": "23.50",
+      "value": 23.50,
       "timestamp": "2026-01-16T10:30:00.000Z"
     },
     {
