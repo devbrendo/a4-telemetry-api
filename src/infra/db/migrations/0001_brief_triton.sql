@@ -1,0 +1,1 @@
+ALTER TABLE "sensor_readings" ALTER COLUMN "value" SET DATA TYPE numeric(10, 2);
